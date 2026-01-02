@@ -7,21 +7,57 @@ on:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-20.04
     
     steps:
-    - name: Checkout
+    - name: Checkout code
       uses: actions/checkout@v4
     
-    - name: Build with Buildozer
-      uses: ArtemSBulgakov/buildozer-action@v1
-      id: buildozer
+    - name: Set up Python
+      uses: actions/setup-python@v4
       with:
-        command: buildozer android debug
-        buildozer_version: stable
+        python-version: '3.10'
+    
+    - name: Install system dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y \
+          python3-pip \
+          build-essential \
+          git \
+          zip \
+          unzip \
+          openjdk-17-jdk \
+          autoconf \
+          automake \
+          libtool \
+          pkg-config \
+          zlib1g-dev \
+          libncurses5-dev \
+          libffi-dev \
+          libssl-dev \
+          libsqlite3-dev
+    
+    - name: Install Buildozer
+      run: |
+        pip3 install --upgrade pip
+        pip3 install --upgrade buildozer
+        pip3 install --upgrade cython==0.29.33
+    
+    - name: Make buildozer directory
+      run: |
+        mkdir -p ~/.buildozer/android/platform
+    
+    - name: Build APK
+      run: |
+        yes | buildozer android debug || buildozer android debug
+      env:
+        GRADLE_OPTS: -Xmx2048m
+        JAVA_OPTS: -Xmx2048m
     
     - name: Upload APK
       uses: actions/upload-artifact@v4
       with:
-        name: yascan-apk
-        path: ${{ steps.buildozer.outputs.filename }}
+        name: yascan-debug-apk
+        path: bin/*.apk
+        retention-days: 30
