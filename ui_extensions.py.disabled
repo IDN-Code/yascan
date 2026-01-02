@@ -1,0 +1,529 @@
+"""
+Pantallas Adicionales para DeepChat Secure
+Grupos y Transferencia de Archivos
+"""
+
+from kivy.uix.screenmanager import Screen
+from kivy.uix.boxlayout import BoxLayout
+from kivy.uix.gridlayout import GridLayout
+from kivy.uix.button import Button
+from kivy.uix.label import Label
+from kivy.uix.textinput import TextInput
+from kivy.uix.scrollview import ScrollView
+from kivy.uix.popup import Popup
+from kivy.uix.filechooser import FileChooserListView
+from kivy.uix.progressbar import ProgressBar
+from kivy.app import App
+from kivy.clock import Clock
+
+import threading
+from datetime import datetime
+
+
+class GroupsScreen(Screen):
+    """Pantalla de gestión de grupos"""
+    
+    def __init__(self, **kwargs):
+        super(GroupsScreen, self).__init__(**kwargs)
+        self.layout = BoxLayout(orientation='vertical', padding=10, spacing=5)
+        
+        # Header
+        header = BoxLayout(size_hint=(1, 0.1), spacing=10)
+        
+        back_btn = Button(
+            text='←',
+            size_hint=(0.15, 1),
+            on_press=self.go_back
+        )
+        
+        title = Label(
+            text='Grupos',
+            size_hint=(0.7, 1),
+            font_size='20sp'
+        )
+        
+        new_group_btn = Button(
+            text='+',
+            size_hint=(0.15, 1),
+            on_press=self.create_new_group
+        )
+        
+        header.add_widget(back_btn)
+        header.add_widget(title)
+        header.add_widget(new_group_btn)
+        
+        # Lista de grupos
+        scroll = ScrollView(size_hint=(1, 0.9))
+        self.groups_list = GridLayout(cols=1, spacing=5, size_hint_y=None)
+        self.groups_list.bind(minimum_height=self.groups_list.setter('height'))
+        
+        scroll.add_widget(self.groups_list)
+        
+        # Ensamblar
+        self.layout.add_widget(header)
+        self.layout.add_widget(scroll)
+        self.add_widget(self.layout)
+    
+    def on_enter(self):
+        """Al entrar a la pantalla"""
+        self.load_groups()
+    
+    def load_groups(self):
+        """Cargar lista de grupos"""
+        app = App.get_running_app()
+        self.groups_list.clear_widgets()
+        
+        if hasattr(app, 'group_manager'):
+            groups = app.group_manager.get_groups()
+            
+            for group in groups:
+                group_btn = Button(
+                    text=f"{group['name']}\n{len(group['members'])} miembros",
+                    size_hint_y=None,
+                    height=80,
+                    on_press=lambda x, g=group: self.open_group(g)
+                )
+                self.groups_list.add_widget(group_btn)
+    
+    def create_new_group(self, instance):
+        """Crear nuevo grupo"""
+        content = BoxLayout(orientation='vertical', padding=10, spacing=10)
+        
+        name_input = TextInput(hint_text='Nombre del grupo', multiline=False)
+        
+        # Selector de contactos
+        contacts_label = Label(text='Seleccionar contactos:', size_hint=(1, 0.2))
+        
+        # Lista de contactos
+        scroll = ScrollView(size_hint=(1, 0.6))
+        self.contacts_checkboxes = GridLayout(cols=1, spacing=5, size_hint_y=None)
+        self.contacts_checkboxes.bind(
+            minimum_height=self.contacts_checkboxes.setter('height')
+        )
+        
+        app = App.get_running_app()
+        contacts = app.crypto_manager.load_contacts()
+        
+        self.selected_members = []
+        
+        for contact in contacts:
+            checkbox_layout = BoxLayout(size_hint_y=None, height=40)
+            
+            checkbox = Button(
+                text='☐',
+                size_hint=(0.2, 1),
+                on_press=lambda x, c=contact: self.toggle_member(x, c)
+            )
+            checkbox.contact = contact
+            
+            label = Label(text=contact['name'], size_hint=(0.8, 1))
+            
+            checkbox_layout.add_widget(checkbox)
+            checkbox_layout.add_widget(label)
+            
+            self.contacts_checkboxes.add_widget(checkbox_layout)
+        
+        scroll.add_widget(self.contacts_checkboxes)
+        
+        # Botones
+        btn_layout = BoxLayout(size_hint=(1, 0.2), spacing=10)
+        
+        popup = Popup(
+            title='Crear Grupo',
+            content=content,
+            size_hint=(0.9, 0.8)
+        )
+        
+        def create_group(instance):
+            name = name_input.text.strip()
+            if name and self.selected_members:
+                member_addresses = [m['onion_address'] for m in self.selected_members]
+                
+                app.group_manager.create_group(name, member_addresses)
+                self.load_groups()
+                popup.dismiss()
+        
+        create_btn = Button(text='Crear', on_press=create_group)
+        cancel_btn = Button(text='Cancelar', on_press=popup.dismiss)
+        
+        btn_layout.add_widget(create_btn)
+        btn_layout.add_widget(cancel_btn)
+        
+        content.add_widget(name_input)
+        content.add_widget(contacts_label)
+        content.add_widget(scroll)
+        content.add_widget(btn_layout)
+        
+        popup.open()
+    
+    def toggle_member(self, button, contact):
+        """Alternar selección de miembro"""
+        if button.text == '☐':
+            button.text = '☑'
+            self.selected_members.append(contact)
+        else:
+            button.text = '☐'
+            self.selected_members.remove(contact)
+    
+    def open_group(self, group):
+        """Abrir chat de grupo"""
+        app = App.get_running_app()
+        app.current_group = group
+        self.manager.current = 'group_chat'
+    
+    def go_back(self, instance):
+        """Volver a pantalla principal"""
+        self.manager.current = 'main'
+
+
+class GroupChatScreen(Screen):
+    """Pantalla de chat grupal"""
+    
+    def __init__(self, **kwargs):
+        super(GroupChatScreen, self).__init__(**kwargs)
+        self.layout = BoxLayout(orientation='vertical', padding=5, spacing=5)
+        
+        # Header
+        header = BoxLayout(size_hint=(1, 0.08), spacing=10)
+        
+        back_btn = Button(
+            text='←',
+            size_hint=(0.1, 1),
+            on_press=self.go_back
+        )
+        
+        self.group_label = Label(
+            text='Grupo',
+            size_hint=(0.6, 1)
+        )
+        
+        call_btn = Button(
+            text='📹',
+            size_hint=(0.1, 1),
+            on_press=self.start_group_call
+        )
+        
+        file_btn = Button(
+            text='📎',
+            size_hint=(0.1, 1),
+            on_press=self.send_file
+        )
+        
+        info_btn = Button(
+            text='ℹ️',
+            size_hint=(0.1, 1),
+            on_press=self.show_group_info
+        )
+        
+        header.add_widget(back_btn)
+        header.add_widget(self.group_label)
+        header.add_widget(call_btn)
+        header.add_widget(file_btn)
+        header.add_widget(info_btn)
+        
+        # Mensajes
+        scroll = ScrollView(size_hint=(1, 0.82))
+        self.messages_layout = GridLayout(
+            cols=1,
+            spacing=5,
+            size_hint_y=None,
+            padding=10
+        )
+        self.messages_layout.bind(
+            minimum_height=self.messages_layout.setter('height')
+        )
+        scroll.add_widget(self.messages_layout)
+        
+        # Input
+        input_layout = BoxLayout(size_hint=(1, 0.1), spacing=5)
+        
+        self.message_input = TextInput(
+            hint_text='Mensaje al grupo...',
+            multiline=True,
+            size_hint=(0.85, 1)
+        )
+        
+        send_btn = Button(
+            text='Enviar',
+            size_hint=(0.15, 1),
+            on_press=self.send_message
+        )
+        
+        input_layout.add_widget(self.message_input)
+        input_layout.add_widget(send_btn)
+        
+        # Ensamblar
+        self.layout.add_widget(header)
+        self.layout.add_widget(scroll)
+        self.layout.add_widget(input_layout)
+        self.add_widget(self.layout)
+    
+    def on_enter(self):
+        """Al entrar al chat grupal"""
+        app = App.get_running_app()
+        if hasattr(app, 'current_group'):
+            group = app.current_group
+            self.group_label.text = f"{group['name']} ({len(group['members'])})"
+            self.load_messages()
+    
+    def load_messages(self):
+        """Cargar mensajes del grupo"""
+        app = App.get_running_app()
+        self.messages_layout.clear_widgets()
+        
+        messages = app.group_manager.get_group_messages(app.current_group['id'])
+        
+        for msg in messages:
+            self.add_message_to_ui(msg)
+    
+    def add_message_to_ui(self, message):
+        """Agregar mensaje al UI"""
+        msg_box = BoxLayout(
+            size_hint=(1, None),
+            height=60,
+            padding=5
+        )
+        
+        sender = message.get('sender', '').split('.')[0][:15]
+        text = message.get('text', '')
+        timestamp = message.get('timestamp', '')
+        
+        msg_label = Label(
+            text=f"[{sender}]: {text}\n{timestamp}",
+            size_hint=(1, 1)
+        )
+        
+        msg_box.add_widget(msg_label)
+        self.messages_layout.add_widget(msg_box)
+    
+    def send_message(self, instance):
+        """Enviar mensaje al grupo"""
+        text = self.message_input.text.strip()
+        if not text:
+            return
+        
+        app = App.get_running_app()
+        group_id = app.current_group['id']
+        
+        # Enviar en thread separado
+        threading.Thread(
+            target=app.group_manager.send_group_message,
+            args=(group_id, text),
+            daemon=True
+        ).start()
+        
+        # Limpiar input
+        self.message_input.text = ''
+        
+        # Simular mensaje enviado inmediatamente en UI
+        message = {
+            'sender': app.crypto_manager.load_identity()['onion_address'],
+            'text': text,
+            'timestamp': datetime.now().strftime('%H:%M')
+        }
+        self.add_message_to_ui(message)
+    
+    def start_group_call(self, instance):
+        """Iniciar llamada grupal"""
+        # TODO: Implementar videollamada grupal
+        pass
+    
+    def send_file(self, instance):
+        """Enviar archivo al grupo"""
+        self.show_file_picker('send')
+    
+    def show_file_picker(self, mode):
+        """Mostrar selector de archivos"""
+        content = BoxLayout(orientation='vertical')
+        
+        filechooser = FileChooserListView()
+        
+        btn_layout = BoxLayout(size_hint=(1, 0.1), spacing=10)
+        
+        popup = Popup(
+            title='Seleccionar archivo',
+            content=content,
+            size_hint=(0.9, 0.9)
+        )
+        
+        def select_file(instance):
+            if filechooser.selection:
+                file_path = filechooser.selection[0]
+                popup.dismiss()
+                
+                if mode == 'send':
+                    self._send_file_to_group(file_path)
+        
+        select_btn = Button(text='Seleccionar', on_press=select_file)
+        cancel_btn = Button(text='Cancelar', on_press=popup.dismiss)
+        
+        btn_layout.add_widget(select_btn)
+        btn_layout.add_widget(cancel_btn)
+        
+        content.add_widget(filechooser)
+        content.add_widget(btn_layout)
+        
+        popup.open()
+    
+    def _send_file_to_group(self, file_path):
+        """Enviar archivo a todos los miembros del grupo"""
+        app = App.get_running_app()
+        
+        # Mostrar progreso
+        self.show_transfer_progress()
+        
+        # Enviar en thread
+        threading.Thread(
+            target=app.group_file_transfer.send_file_to_group,
+            args=(app.current_group['id'], file_path),
+            daemon=True
+        ).start()
+    
+    def show_transfer_progress(self):
+        """Mostrar progreso de transferencia"""
+        content = BoxLayout(orientation='vertical', padding=10, spacing=10)
+        
+        label = Label(text='Enviando archivo al grupo...')
+        
+        self.progress_bar = ProgressBar(max=100)
+        
+        content.add_widget(label)
+        content.add_widget(self.progress_bar)
+        
+        self.progress_popup = Popup(
+            title='Transferencia',
+            content=content,
+            size_hint=(0.8, 0.3)
+        )
+        self.progress_popup.open()
+    
+    def update_progress(self, value):
+        """Actualizar barra de progreso"""
+        self.progress_bar.value = value
+        
+        if value >= 100:
+            Clock.schedule_once(lambda dt: self.progress_popup.dismiss(), 1)
+    
+    def show_group_info(self, instance):
+        """Mostrar información del grupo"""
+        app = App.get_running_app()
+        group = app.current_group
+        
+        info_text = f"Nombre: {group['name']}\n"
+        info_text += f"Miembros: {len(group['members'])}\n"
+        info_text += f"Creado: {group.get('created_at', 'N/A')}\n"
+        info_text += f"Admin: {group.get('admin', 'N/A')[:20]}..."
+        
+        popup = Popup(
+            title='Información del Grupo',
+            content=Label(text=info_text),
+            size_hint=(0.8, 0.4)
+        )
+        popup.open()
+    
+    def go_back(self, instance):
+        """Volver a lista de grupos"""
+        self.manager.current = 'groups'
+
+
+class FileTransferScreen(Screen):
+    """Pantalla de transferencias de archivos"""
+    
+    def __init__(self, **kwargs):
+        super(FileTransferScreen, self).__init__(**kwargs)
+        self.layout = BoxLayout(orientation='vertical', padding=10, spacing=5)
+        
+        # Header
+        header = BoxLayout(size_hint=(1, 0.1), spacing=10)
+        
+        back_btn = Button(
+            text='←',
+            size_hint=(0.2, 1),
+            on_press=self.go_back
+        )
+        
+        title = Label(
+            text='Transferencias',
+            size_hint=(0.8, 1),
+            font_size='20sp'
+        )
+        
+        header.add_widget(back_btn)
+        header.add_widget(title)
+        
+        # Lista de transferencias
+        scroll = ScrollView(size_hint=(1, 0.9))
+        self.transfers_list = GridLayout(cols=1, spacing=5, size_hint_y=None)
+        self.transfers_list.bind(
+            minimum_height=self.transfers_list.setter('height')
+        )
+        
+        scroll.add_widget(self.transfers_list)
+        
+        # Ensamblar
+        self.layout.add_widget(header)
+        self.layout.add_widget(scroll)
+        self.add_widget(self.layout)
+        
+        # Auto-actualizar cada 2 segundos
+        Clock.schedule_interval(self.update_transfers, 2.0)
+    
+    def update_transfers(self, dt):
+        """Actualizar lista de transferencias"""
+        app = App.get_running_app()
+        self.transfers_list.clear_widgets()
+        
+        if hasattr(app, 'file_manager'):
+            transfers = app.file_manager.get_active_transfers()
+            
+            for transfer in transfers:
+                self.add_transfer_item(transfer)
+    
+    def add_transfer_item(self, transfer):
+        """Agregar item de transferencia"""
+        item_layout = BoxLayout(
+            size_hint_y=None,
+            height=80,
+            padding=5,
+            spacing=10
+        )
+        
+        # Info
+        info_layout = BoxLayout(orientation='vertical', size_hint=(0.7, 1))
+        
+        filename = transfer.get('metadata', {}).get('filename', 'Unknown')
+        status = transfer.get('status', 'unknown')
+        transfer_type = transfer.get('type', 'unknown')
+        
+        name_label = Label(
+            text=filename,
+            size_hint=(1, 0.5)
+        )
+        
+        status_label = Label(
+            text=f"{transfer_type.upper()}: {status}",
+            size_hint=(1, 0.5),
+            color=(0, 1, 0, 1) if status == 'completed' else (1, 1, 0, 1)
+        )
+        
+        info_layout.add_widget(name_label)
+        info_layout.add_widget(status_label)
+        
+        # Progreso
+        if status == 'sending' or status == 'receiving':
+            progress = transfer.get('chunks_sent', 0) / transfer.get('metadata', {}).get('total_chunks', 1)
+            progress_bar = ProgressBar(
+                max=100,
+                value=progress * 100,
+                size_hint=(0.3, 1)
+            )
+            item_layout.add_widget(info_layout)
+            item_layout.add_widget(progress_bar)
+        else:
+            item_layout.add_widget(info_layout)
+        
+        self.transfers_list.add_widget(item_layout)
+    
+    def go_back(self, instance):
+        """Volver a pantalla principal"""
+        self.manager.current = 'main'

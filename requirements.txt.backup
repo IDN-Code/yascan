@@ -1,0 +1,25 @@
+# DeepChat Secure - Dependencias
+
+# Framework UI Android
+kivy==2.2.1
+python-for-android==2023.10.15
+
+# Criptografía
+cryptography==41.0.7
+pycryptodome==3.19.0
+
+# Tor y networking
+PySocks==1.7.1
+stem==1.8.2
+requests[socks]==2.31.0
+
+# Video y multimedia
+opencv-python==4.8.1.78
+numpy==1.24.4
+Pillow==10.1.0
+
+# Audio (opcional, para videollamadas)
+# pyaudio==0.2.13
+
+# Utilidades
+qrcode==7.4.2
