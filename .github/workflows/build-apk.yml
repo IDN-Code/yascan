@@ -10,19 +10,21 @@ jobs:
     runs-on: ubuntu-22.04
     
     steps:
-    - name: Checkout code
+    - name: Checkout
       uses: actions/checkout@v4
-    
+
+    - name: Setup Android SDK
+      uses: android-actions/setup-android@v3
+
     - name: Set up Python
       uses: actions/setup-python@v4
       with:
         python-version: '3.9'
     
-    - name: Install system dependencies
+    - name: Install dependencies
       run: |
         sudo apt-get update
         sudo apt-get install -y \
-          python3-pip \
           build-essential \
           git \
           zip \
@@ -39,22 +41,22 @@ jobs:
           libsqlite3-dev \
           libltdl-dev
     
-    - name: Install Buildozer and dependencies
+    - name: Install Buildozer
       run: |
         pip3 install --upgrade pip
-        pip3 install --upgrade wheel setuptools
         pip3 install buildozer==1.5.0
         pip3 install cython==0.29.33
     
-    - name: Build APK
+    - name: Accept Android licenses
+      run: |
+        yes | sdkmanager --licenses || true
+    
+    - name: Build with Buildozer
       run: |
         buildozer android debug
       env:
-        GRADLE_OPTS: -Xmx2048m
-        JAVA_OPTS: -Xmx2048m
-        P4A_RELEASE_KEYSTORE: ""
-        P4A_RELEASE_KEYSTORE_PASSWD: ""
-        P4A_RELEASE_KEYALIAS_PASSWD: ""
+        ANDROID_SDK_ROOT: /usr/local/lib/android/sdk
+        ANDROID_HOME: /usr/local/lib/android/sdk
     
     - name: Upload APK
       uses: actions/upload-artifact@v4
